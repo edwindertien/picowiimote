@@ -1,0 +1,44 @@
+{
+  "_comment": "WiiMote MIDI Bridge — mapping configuration",
+  "midi_channel": 1,
+
+  "buttons": {
+    "A":     { "type": "note", "note": 65, "velocity": 100 },
+    "B":     { "type": "note", "note": 64, "velocity": 100 },
+    "ONE":   { "type": "note", "note": 60, "velocity": 100 },
+    "TWO":   { "type": "note", "note": 62, "velocity": 100 },
+    "UP":    { "type": "note", "note": 74, "velocity": 100 },
+    "DOWN":  { "type": "note", "note": 71, "velocity": 100 },
+    "LEFT":  { "type": "note", "note": 69, "velocity": 100 },
+    "RIGHT": { "type": "note", "note": 70, "velocity": 100 },
+    "PLUS":  { "type": "note", "note": 76, "velocity": 100 },
+    "MINUS": { "type": "note", "note": 67, "velocity": 100 },
+    "HOME":  { "type": "note", "note": 72, "velocity": 100 }
+  },
+
+  "accel": {
+    "enabled": true,
+    "gate_button": "B",
+    "update_rate_ms": 50,
+    "x": { "cc": 20, "min_raw": -256, "max_raw": 256 },
+    "y": { "cc": 21, "min_raw": -256, "max_raw": 256 },
+    "z": { "cc": 22, "min_raw": -256, "max_raw": 256 }
+  },
+
+  "nunchuk": {
+    "enabled": false,
+    "joy_x":   { "cc": 30 },
+    "joy_y":   { "cc": 31 },
+    "accel_x": { "cc": 32 },
+    "accel_y": { "cc": 33 },
+    "accel_z": { "cc": 34 },
+    "C": { "type": "note", "note": 48, "velocity": 100 },
+    "Z": { "type": "note", "note": 50, "velocity": 100 }
+  },
+
+  "ir": {
+    "enabled": false,
+    "blob1_x": { "cc": 40 },
+    "blob1_y": { "cc": 41 }
+  }
+}
