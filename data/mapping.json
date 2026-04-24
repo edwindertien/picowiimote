@@ -1,5 +1,4 @@
 {
-  "_comment": "WiiMote MIDI Bridge — mapping configuration",
   "midi_channel": 1,
 
   "buttons": {
@@ -27,13 +26,32 @@
 
   "nunchuk": {
     "enabled": false,
-    "joy_x":   { "cc": 30 },
-    "joy_y":   { "cc": 31 },
-    "accel_x": { "cc": 32 },
-    "accel_y": { "cc": 33 },
-    "accel_z": { "cc": 34 },
+    "joy_x":   { "cc": 30, "min_raw": -128, "max_raw": 127 },
+    "joy_y":   { "cc": 31, "min_raw": -128, "max_raw": 127 },
+    "accel_x": { "cc": 32, "min_raw": -256, "max_raw": 256 },
+    "accel_y": { "cc": 33, "min_raw": -256, "max_raw": 256 },
+    "accel_z": { "cc": 34, "min_raw": -256, "max_raw": 256 },
     "C": { "type": "note", "note": 48, "velocity": 100 },
     "Z": { "type": "note", "note": 50, "velocity": 100 }
+  },
+
+  "guitar_hero": {
+    "enabled": true,
+    "whammy_cc":  23,
+    "touch_cc":   24,
+    "tilt_x_cc":  25,
+    "tilt_z_cc":  26,
+    "buttons": {
+      "green":      { "type": "note", "note": 48, "velocity": 100 },
+      "red":        { "type": "note", "note": 49, "velocity": 100 },
+      "yellow":     { "type": "note", "note": 50, "velocity": 100 },
+      "blue":       { "type": "note", "note": 51, "velocity": 100 },
+      "orange":     { "type": "note", "note": 52, "velocity": 100 },
+      "strum_down": { "type": "note", "note": 53, "velocity": 100 },
+      "strum_up":   { "type": "note", "note": 54, "velocity": 100 },
+      "minus":      { "type": "note", "note": 55, "velocity": 100 },
+      "plus":       { "type": "note", "note": 56, "velocity": 100 }
+    }
   },
 
   "ir": {
