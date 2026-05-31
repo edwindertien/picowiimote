@@ -4,6 +4,8 @@ Raspberry Pi Pico W firmware that bridges a Nintendo WiiMote (and Nunchuk /
 Guitar Hero extension) to USB MIDI. The Pico W appears as **"WiiMote MIDI"**
 in your OS device list alongside a CDC Serial port for debug output.
 
+Information and inspiration from [WiiBrew](https://wiibrew.org/wiki/Wiimote/Extension_Controllers) and also from thie [Cornell university student project](https://github.com/EmithU/PicoWiimote-public)
+
 ## Hardware
 
 | Item | Detail |

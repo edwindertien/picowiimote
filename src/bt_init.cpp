@@ -27,13 +27,15 @@ volatile uint16_t g_btn_cur    = 0;
 volatile int16_t  g_raw_ax     = 0, g_raw_ay = 0, g_raw_az = 0;
 volatile bool     g_new_report = false;
 volatile bool     g_connected  = false;
-volatile uint8_t  g_ext_type   = 0;   // 0=none 1=nunchuk 2=guitar
+volatile uint8_t  g_ext_type   = 0;   // 0=none 1=nunchuk 2=guitar 3=balance_board
 volatile int8_t   g_nc_jx      = 0, g_nc_jy = 0;
 volatile int16_t  g_nc_ax      = 0, g_nc_ay = 0, g_nc_az = 0;
 volatile bool     g_nc_btn_c   = false, g_nc_btn_z = false;
 volatile uint16_t g_gh_btns    = 0;
 volatile uint8_t  g_gh_whammy  = 0;
 volatile int8_t   g_gh_touch   = 0, g_gh_tilt_x = 0, g_gh_tilt_z = 0;
+// Balance Board: 4 sensors, raw 16-bit values (0 = no weight, ~10000 = ~34kg each)
+volatile uint16_t g_bb_tl = 0, g_bb_tr = 0, g_bb_bl = 0, g_bb_br = 0;
 
 // ── Callbacks in main.cpp ────────────────────────────────────────────────
 extern void on_wiimote_connected(const bd_addr_t addr);
@@ -41,7 +43,7 @@ extern void on_wiimote_disconnected();
 extern void on_extension_detected(uint8_t ext_type, const uint8_t* id6);
 
 // ── Internal state ────────────────────────────────────────────────────────
-#define MAX_DESC 300
+#define MAX_DESC 2048  // Balance Board descriptor can be large; print actual size below
 static uint8_t   hid_desc[MAX_DESC];
 static uint16_t  hid_cid  = 0;
 static bool      desc_ok  = false;
@@ -176,6 +178,17 @@ static void decode_guitar_hero(const uint8_t* ext) {
     g_gh_tilt_z = (int8_t)ext[5];
 }
 
+// Balance Board: 8 extension bytes in report 0x32
+// Layout: [TL_hi][TL_lo][TR_hi][TR_lo][BL_hi][BL_lo][BR_hi][BR_lo]
+// Raw values: 0 = no weight, ~10000 per sensor at full body weight (~34kg each)
+// Top/Bottom Left/Right from WiiMote perspective (placed in front of TV)
+static void decode_balance_board(const uint8_t* ext) {
+    g_bb_tl = ((uint16_t)ext[0]<<8) | ext[1];
+    g_bb_tr = ((uint16_t)ext[2]<<8) | ext[3];
+    g_bb_bl = ((uint16_t)ext[4]<<8) | ext[5];
+    g_bb_br = ((uint16_t)ext[6]<<8) | ext[7];
+}
+
 // ── Report handler ────────────────────────────────────────────────────────
 
 static void handle_report(const uint8_t* r, uint16_t len) {
@@ -267,6 +280,8 @@ static void handle_report(const uint8_t* r, uint16_t len) {
                 { Serial.println("[EXT] Nunchuk!"); detected = 1; }
             else if (id[2]==0xA4 && id[3]==0x20 && id[4]==0x01 && id[5]==0x03)
                 { Serial.println("[EXT] Guitar Hero 3!"); detected = 2; }
+            else if (id[2]==0xA4 && id[3]==0x20 && id[4]==0x04 && id[5]==0x02)
+                { Serial.println("[EXT] Balance Board!"); detected = 3; }
             else if (id[2]==0xA4 && id[3]==0x20 && id[4]==0x01 && id[5]==0x01)
                 { Serial.println("[EXT] Classic Controller (unsupported)"); }
             else if (id[0]==0xFF)
@@ -314,10 +329,12 @@ static void handle_report(const uint8_t* r, uint16_t len) {
     if (rid==0x32 && len>=10) {
         if      (g_ext_type==1) decode_nunchuk(&r[4]);
         else if (g_ext_type==2) decode_guitar_hero(&r[4]);
+        else if (g_ext_type==3) decode_balance_board(&r[4]);
     }
     if (rid==0x35 && len>=21) {
         if      (g_ext_type==1) decode_nunchuk(&r[7]);
         else if (g_ext_type==2) decode_guitar_hero(&r[7]);
+        else if (g_ext_type==3) decode_balance_board(&r[7]);
     }
     g_new_report = true;
 }
@@ -335,6 +352,7 @@ static void do_connect() {
     if (app_state == ST_CONNECTING || app_state == ST_CONNECTED) return;
     Serial.printf("[BT] Connecting → %s\n", bd_addr_to_str(remote_addr));
     Serial.flush();
+    // Try REPORT mode first; Balance Board may need BOOT mode if this fails with 0x66
     uint8_t st = hid_host_connect(remote_addr, HID_PROTOCOL_MODE_REPORT, &hid_cid);
     if (st == ERROR_CODE_SUCCESS) app_state = ST_CONNECTING;
     else { Serial.printf("[BT] Connect error 0x%02X\n", st); Serial.flush(); }
@@ -410,7 +428,14 @@ static void packet_handler(uint8_t ptype, uint16_t ch, uint8_t* pkt, uint16_t si
                 on_wiimote_connected(remote_addr);
                 Serial.printf("[HID] *** Connected! cid=%u ***\n", hid_cid);
             } else {
-                Serial.printf("[HID] Failed 0x%02X\n", st);
+                Serial.printf("[HID] Failed 0x%02X", st);
+                switch (st) {
+                case 0x04: Serial.print(" (page timeout — device out of range)"); break;
+                case 0x0B: Serial.print(" (rejected — bonded elsewhere, hold SYNC 15s)"); break;
+                case 0x66: Serial.printf(" (unsupported — MAX_DESC=%d may be too small, or device needs different HID protocol)", MAX_DESC); break;
+                default:   break;
+                }
+                Serial.println();
                 hid_cid   = 0;
                 app_state = ST_IDLE;
             }
@@ -420,10 +445,16 @@ static void packet_handler(uint8_t ptype, uint16_t ch, uint8_t* pkt, uint16_t si
 
         case HID_SUBEVENT_DESCRIPTOR_AVAILABLE:
             if (hid_subevent_descriptor_available_get_status(pkt) == ERROR_CODE_SUCCESS) {
-                desc_ok = true;
-                Serial.println("[HID] Descriptor OK — configuring WiiMote");
+                uint16_t cid_tmp = hid_subevent_descriptor_available_get_hid_cid(pkt);
+                uint16_t dlen = hid_descriptor_storage_get_descriptor_len(cid_tmp);
+                Serial.printf("[HID] Descriptor OK — %u bytes (buffer=%d)\n", dlen, MAX_DESC);
                 Serial.flush();
+                desc_ok = true;
                 wm_configure();
+            } else {
+                Serial.printf("[HID] Descriptor failed 0x%02X\n",
+                              hid_subevent_descriptor_available_get_status(pkt));
+                Serial.flush();
             }
             break;
 

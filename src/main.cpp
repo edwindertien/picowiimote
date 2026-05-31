@@ -35,6 +35,7 @@ extern volatile bool     g_nc_btn_c, g_nc_btn_z;
 extern volatile uint16_t g_gh_btns;
 extern volatile uint8_t  g_gh_whammy;
 extern volatile int8_t   g_gh_touch, g_gh_tilt_x, g_gh_tilt_z;
+extern volatile uint16_t g_bb_tl, g_bb_tr, g_bb_bl, g_bb_br;
 
 extern void bt_hid_init(const uint8_t* saved_addr, bool has_saved, uint8_t ext_type);
 extern void bt_hid_loop_update();
@@ -142,23 +143,36 @@ struct NunchukMap {
 
 struct GuitarMap {
     bool    enabled   = false;
-    BtnMap  btn[9];       // strum_dn,strum_up,minus,plus,green,red,yellow,blue,orange
+    BtnMap  btn[9];
     uint8_t whammy_cc = 0;
     uint8_t touch_cc  = 0;
     uint8_t tilt_x_cc = 0;
     uint8_t tilt_z_cc = 0;
 };
 
+struct BalanceBoardMap {
+    bool     enabled  = false;
+    uint8_t  tl_cc    = 0;      // top-left raw sensor
+    uint8_t  tr_cc    = 0;      // top-right raw sensor
+    uint8_t  bl_cc    = 0;      // bottom-left raw sensor
+    uint8_t  br_cc    = 0;      // bottom-right raw sensor
+    uint8_t  total_cc = 0;      // sum of all 4 (total weight)
+    uint8_t  x_cc     = 0;      // centre-of-gravity left/right
+    uint8_t  y_cc     = 0;      // centre-of-gravity front/back
+    uint16_t max_raw  = 40000;  // raw sum at max expected weight
+};
+
 struct Config {
-    uint8_t    midi_ch    = 1;
-    BtnMap     btn[13];
-    bool       accel_en   = true;
-    uint8_t    accel_gate = 0xFF;   // 0xFF = no gate
-    uint32_t   accel_ms   = 50;
-    AccelAxis  accel[3];
-    NunchukMap nunchuk;
-    GuitarMap  guitar;
-    uint8_t    ext_type   = 0;      // 0=none 1=nunchuk 2=guitar
+    uint8_t       midi_ch    = 1;
+    BtnMap        btn[13];
+    bool          accel_en   = true;
+    uint8_t       accel_gate = 0xFF;
+    uint32_t      accel_ms   = 50;
+    AccelAxis     accel[3];
+    NunchukMap    nunchuk;
+    GuitarMap     guitar;
+    BalanceBoardMap balance;
+    uint8_t       ext_type   = 0;  // 0=none 1=nunchuk 2=guitar 3=balance
 } cfg;
 
 // Called from bt_init.cpp after extension detection sequence completes
@@ -184,6 +198,19 @@ void on_extension_detected(uint8_t ext_type, const uint8_t* id6) {
     if (ext_type == 2) {
         cfg.guitar.enabled = true;
         Serial.println("[EXT] Guitar Hero: enabled");
+    }
+    if (ext_type == 3) {
+        cfg.balance.enabled = true;
+        if (cfg.balance.total_cc == 0) {
+            // Defaults: total weight → CC40, CoG X → CC41, CoG Y → CC42
+            Serial.println("[EXT] Balance Board: using defaults (total=CC40, x=CC41, y=CC42)");
+            cfg.balance.total_cc = 40;
+            cfg.balance.x_cc     = 41;
+            cfg.balance.y_cc     = 42;
+            cfg.balance.max_raw  = 40000;
+        } else {
+            Serial.println("[EXT] Balance Board: using mapping from mapping.json");
+        }
     }
 
     Serial.printf("[EXT] Extension ready: type=%d (%s)\n",
@@ -310,6 +337,21 @@ static void loadMapping() {
                 cfg.guitar.btn[i] = parseBtnMap(gbtns[gnames[i]].as<JsonObject>());
         cfg.ext_type = 2;
         Serial.println("[FS] Guitar Hero enabled → ext_type=2, report mode 0x35");
+    }
+
+    JsonObject bb = doc["balance_board"];
+    if (!bb.isNull() && (bb["enabled"]|false)) {
+        cfg.balance.enabled  = true;
+        cfg.balance.total_cc = bb["total_cc"] | 40;
+        cfg.balance.x_cc     = bb["x_cc"]     | 41;
+        cfg.balance.y_cc     = bb["y_cc"]     | 42;
+        cfg.balance.tl_cc    = bb["tl_cc"]    | 0;
+        cfg.balance.tr_cc    = bb["tr_cc"]    | 0;
+        cfg.balance.bl_cc    = bb["bl_cc"]    | 0;
+        cfg.balance.br_cc    = bb["br_cc"]    | 0;
+        cfg.balance.max_raw  = bb["max_raw"]  | 40000;
+        cfg.ext_type = 3;
+        Serial.println("[FS] Balance Board enabled → ext_type=3");
     }
 
     Serial.printf("[FS] Mapping OK: ch=%d accel=%s gate=%d rate=%lums ext=%d\n",
@@ -477,15 +519,51 @@ static void process_guitar() {
     sendCC(cfg.guitar.tilt_z_cc, tz,    -128, 127, cc_prev_gh[3]);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CSV STREAM
-// ═══════════════════════════════════════════════════════════════════════════
+// ── Balance Board ─────────────────────────────────────────────────────────
+static uint8_t cc_prev_bb[7] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+
+static void process_balance() {
+    if (!cfg.balance.enabled || g_ext_type != 3) return;
+
+    noInterrupts();
+    uint16_t tl=g_bb_tl, tr=g_bb_tr, bl=g_bb_bl, br=g_bb_br;
+    interrupts();
+
+    uint32_t total = (uint32_t)tl + tr + bl + br;
+    uint16_t mx = cfg.balance.max_raw;
+
+    auto sendCC = [&](uint8_t cc, uint32_t val, uint32_t mn, uint32_t vmax, uint8_t& prev) {
+        if (!cc) return;
+        val = constrain(val, mn, vmax);
+        uint8_t v = (uint8_t)((val - mn) * 127 / (vmax - mn));
+        if (v != prev) { MIDI_USB.sendControlChange(cc, v, cfg.midi_ch); prev=v; }
+    };
+
+    sendCC(cfg.balance.tl_cc,    tl,    0, mx/4, cc_prev_bb[0]);
+    sendCC(cfg.balance.tr_cc,    tr,    0, mx/4, cc_prev_bb[1]);
+    sendCC(cfg.balance.bl_cc,    bl,    0, mx/4, cc_prev_bb[2]);
+    sendCC(cfg.balance.br_cc,    br,    0, mx/4, cc_prev_bb[3]);
+    sendCC(cfg.balance.total_cc, total, 0, mx,   cc_prev_bb[4]);
+
+    // Centre-of-gravity: 0=full left/back, 64=centre, 127=full right/front
+    if (cfg.balance.x_cc && total > 100) {
+        uint32_t right = tr + br;
+        uint8_t v = (uint8_t)(right * 127 / total);
+        if (v != cc_prev_bb[5]) { MIDI_USB.sendControlChange(cfg.balance.x_cc, v, cfg.midi_ch); cc_prev_bb[5]=v; }
+    }
+    if (cfg.balance.y_cc && total > 100) {
+        uint32_t top = tl + tr;
+        uint8_t v = (uint8_t)(top * 127 / total);
+        if (v != cc_prev_bb[6]) { MIDI_USB.sendControlChange(cfg.balance.y_cc, v, cfg.midi_ch); cc_prev_bb[6]=v; }
+    }
+}
 #define STREAM_HZ 20
 #define STREAM_MS (1000/STREAM_HZ)
 
 static void print_csv_header() {
     Serial.println("btns,ax,ay,az,nc_jx,nc_jy,nc_ax,nc_ay,nc_az,nc_C,nc_Z,"
-                   "gh_btns,gh_whammy,gh_touch,gh_tilt_x,gh_tilt_z");
+                   "gh_btns,gh_whammy,gh_touch,gh_tilt_x,gh_tilt_z,"
+                   "bb_tl,bb_tr,bb_bl,bb_br");
     Serial.flush();
 }
 
@@ -499,12 +577,14 @@ static void emit_csv() {
     uint16_t ghb=g_gh_btns;
     uint8_t  ghw=g_gh_whammy;
     int8_t   ght=g_gh_touch, ghtx=g_gh_tilt_x, ghtz=g_gh_tilt_z;
+    uint16_t tl=g_bb_tl, tr=g_bb_tr, bl=g_bb_bl, br=g_bb_br;
     interrupts();
 
-    Serial.printf("%u,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%u,%u,%d,%d,%d\n",
+    Serial.printf("%u,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%u,%u,%d,%d,%d,%u,%u,%u,%u\n",
                   btns, ax, ay, az,
                   jx, jy, nax, nay, naz, nc?1:0, nz?1:0,
-                  ghb, ghw, ght, ghtx, ghtz);
+                  ghb, ghw, ght, ghtx, ghtz,
+                  tl, tr, bl, br);
     Serial.flush();
 }
 
@@ -616,6 +696,7 @@ void loop() {
         process_buttons(bc);
         process_nunchuk();
         process_guitar();
+        process_balance();
     }
 
     // Accel CC on timer

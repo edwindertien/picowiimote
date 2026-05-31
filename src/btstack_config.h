@@ -12,7 +12,10 @@
 #define ENABLE_PRINTF_HEXDUMP
 
 #define HCI_OUTGOING_PRE_BUFFER_SIZE    4
-#define HCI_ACL_PAYLOAD_SIZE            (169)
+// 1021 = maximum Bluetooth ACL payload. Needed for devices with large SDP/HID
+// descriptors (e.g. Wii Balance Board). The WiiMote works with 169 but the
+// Balance Board's SDP response exceeds that, causing 0x66 connection failure.
+#define HCI_ACL_PAYLOAD_SIZE            (1021)
 #define HCI_ACL_CHUNK_SIZE_ALIGNMENT    4
 
 #define MAX_NR_HCI_CONNECTIONS          1

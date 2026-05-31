@@ -36,7 +36,7 @@
   },
 
   "guitar_hero": {
-    "enabled": true,
+    "enabled": false,
     "whammy_cc":  23,
     "touch_cc":   24,
     "tilt_x_cc":  25,
@@ -52,6 +52,18 @@
       "minus":      { "type": "note", "note": 55, "velocity": 100 },
       "plus":       { "type": "note", "note": 56, "velocity": 100 }
     }
+  },
+
+  "balance_board": {
+    "enabled": false,
+    "total_cc": 40,
+    "x_cc":     41,
+    "y_cc":     42,
+    "tl_cc":    0,
+    "tr_cc":    0,
+    "bl_cc":    0,
+    "br_cc":    0,
+    "max_raw":  40000
   },
 
   "ir": {
